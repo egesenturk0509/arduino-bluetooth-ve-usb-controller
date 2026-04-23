@@ -10,17 +10,30 @@ export default function UsbSerialPlotter({ port }: any) {
     let reader: any;
 
     const readData = async () => {
-      const textDecoder = new TextDecoderStream();
-      port.readable.pipeTo(textDecoder.writable);
-      reader = textDecoder.readable.getReader();
+      reader = port.readable.getReader();
+      const decoder = new TextDecoder();
+      let partialLine = "";
 
       try {
+        if (port.readable.locked) {
+          setTimeout(readData, 50);
+          return;
+        }
+
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          const num = parseFloat(value.trim());
-          if (!isNaN(num)) {
-            setPoints(prev => [...prev, num].slice(-100));
+          
+          partialLine += decoder.decode(value, { stream: true });
+          const lines = partialLine.split('\n');
+          partialLine = lines.pop() || "";
+
+          for (const line of lines) {
+            const match = line.match(/[\d.]+/);
+            const num = match ? parseFloat(match[0]) : NaN;
+            if (!isNaN(num)) {
+              setPoints(prev => [...prev, num].slice(-100));
+            }
           }
         }
       } catch (err) {
@@ -46,11 +59,14 @@ export default function UsbSerialPlotter({ port }: any) {
     ctx.lineWidth = 3;
     
     const step = canvas.width / 100;
-    const max = Math.max(...points, 1024); // Varsayılan ADC 1024
+    // Otomatik Ölçeklendirme: Ekrandaki noktaların en büyüğünü tavan yap
+    const currentMax = Math.max(...points, 1);
+    const currentMin = Math.min(...points, 0);
+    const range = (currentMax - currentMin) || 1;
 
     points.forEach((p, i) => {
       const x = i * step;
-      const y = canvas.height - (p / max) * canvas.height;
+      const y = canvas.height - ((p - currentMin) / range) * (canvas.height * 0.9) - (canvas.height * 0.05);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });

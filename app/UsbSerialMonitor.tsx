@@ -12,17 +12,28 @@ export default function UsbSerialMonitor({ port, sendCommand }: any) {
     let reader: any;
 
     const readData = async () => {
-      const textDecoder = new TextDecoderStream();
-      // Signal ekleyerek pipe işleminin iptal edilebilir olmasını sağlıyoruz
-      port.readable.pipeTo(textDecoder.writable, { signal: abortController.signal }).catch(() => {});
-      reader = textDecoder.readable.getReader();
+      reader = port.readable.getReader();
+      const decoder = new TextDecoder();
+      let partialLine = "";
 
       try {
+        if (port.readable.locked) {
+          setTimeout(readData, 50);
+          return;
+        }
+
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-          if (value) {
-            setIncoming(prev => [...prev, value].slice(-100));
+          
+          partialLine += decoder.decode(value, { stream: true });
+          const lines = partialLine.split('\n');
+          partialLine = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.trim()) {
+              setIncoming(prev => [...prev, line.trim()].slice(-100));
+            }
           }
         }
       } catch (err) {
