@@ -28,6 +28,44 @@ export default function EgeRobotKontrol() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [parkSensorOn, setParkSensorOn] = useState(false);
+
+  // Klavye Kontrolleri
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isLoggedIn) return;
+      switch (e.key) {
+        case "ArrowUp": sendCommand("F"); break;
+        case "ArrowDown": sendCommand("B"); break;
+        case "ArrowLeft": sendCommand("L"); break;
+        case "ArrowRight": sendCommand("R"); break;
+        case " ": sendCommand("H"); break; // Space -> Korna
+        case "e": case "E": sendCommand("P"); break; // E -> Su Sık
+        case "t": case "T": 
+          const newState = !parkSensorOn;
+          setParkSensorOn(newState);
+          sendCommand(newState ? "X" : "x"); 
+          break;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!isLoggedIn) return;
+      switch (e.key) {
+        case "ArrowUp": case "ArrowDown": case "ArrowLeft": case "ArrowRight":
+          sendCommand("S"); break;
+        case " ": sendCommand("h"); break;
+        case "e": case "E": sendCommand("p"); break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [isLoggedIn, parkSensorOn]);
 
   const baudRates = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600", "1382400"];
 
