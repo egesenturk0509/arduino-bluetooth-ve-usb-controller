@@ -8,11 +8,13 @@ export default function UsbSerialMonitor({ port, sendCommand }: any) {
 
   useEffect(() => {
     if (!port) return;
+    const abortController = new AbortController();
     let reader: any;
 
     const readData = async () => {
       const textDecoder = new TextDecoderStream();
-      port.readable.pipeTo(textDecoder.writable);
+      // Signal ekleyerek pipe işleminin iptal edilebilir olmasını sağlıyoruz
+      port.readable.pipeTo(textDecoder.writable, { signal: abortController.signal }).catch(() => {});
       reader = textDecoder.readable.getReader();
 
       try {
@@ -31,7 +33,10 @@ export default function UsbSerialMonitor({ port, sendCommand }: any) {
     };
 
     readData();
-    return () => reader?.cancel();
+    return () => {
+      abortController.abort();
+      reader?.cancel().catch(() => {});
+    };
   }, [port]);
 
   useEffect(() => {

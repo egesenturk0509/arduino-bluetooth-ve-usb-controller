@@ -95,14 +95,22 @@ export default function EgeRobotKontrol() {
 
   const disconnectUSB = async () => {
     try {
-      if (usbWriter) {
-        usbWriter.releaseLock();
-        setUsbWriter(null);
+      const writer = usbWriter;
+      const port = usbPort;
+
+      // Önce state'leri temizleyerek alt bileşenlerin (monitor/plotter) kilitlerini bırakmasını tetikliyoruz
+      setUsbWriter(null);
+      setUsbPort(null);
+
+      if (writer) {
+        try { await writer.close(); } catch (e) {}
+        try { writer.releaseLock(); } catch (e) {}
       }
-      if (usbPort) {
-        await usbPort.close();
-        setUsbPort(null);
+      
+      if (port) {
+        try { await port.close(); } catch (e) {}
       }
+
       setStatus("Bağlı Değil");
       addLog("USB bağlantısı kesildi.");
     } catch (err: any) {
@@ -147,9 +155,13 @@ export default function EgeRobotKontrol() {
   };
 
   const disconnectBT = () => {
-    if (characteristic?.service?.device?.gatt?.connected) {
-      characteristic.service.device.gatt.disconnect();
-    }
+    try {
+      const device = characteristic?.service?.device;
+      if (device && device.gatt.connected) {
+        device.gatt.disconnect();
+      }
+    } catch (err) {}
+    
     setCharacteristic(null);
     setStatus("Bağlı Değil");
     addLog("Bluetooth bağlantısı kesildi.");
