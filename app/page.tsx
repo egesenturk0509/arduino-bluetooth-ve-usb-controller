@@ -1,3 +1,7 @@
+/**
+ * Uygulamanın ana giriş sayfası.
+ */
+
 "use client";
 import { useState, useEffect } from "react";
 import BluetoothView from "./BluetoothView";
@@ -5,16 +9,27 @@ import UsbView from "./UsbView";
 
 declare global {
   interface Navigator {
-    bluetooth: {
-      requestDevice(options?: unknown): Promise<any>;
-    };
+    bluetooth: Bluetooth;
     serial: {
       requestPort(): Promise<any>;
     };
   }
+  interface Bluetooth extends EventTarget {
+    requestDevice(options?: any): Promise<any>;
+  }
+  interface BluetoothRemoteGATTServer {
+    connect(): Promise<any>;
+    disconnect(): void;
+    connected: boolean;
+    device: any;
+  }
+  interface BluetoothRemoteGATTService {
+    getCharacteristic(uuid: string): Promise<any>;
+    device: any;
+  }
 }
 
-export default function EgeRobotKontrol() {
+export default function Home() {
   const [characteristic, setCharacteristic] = useState<any>(null);
   const [status, setStatus] = useState("Bağlı Değil");
   const [logs, setLogs] = useState<string[]>([]);
@@ -28,57 +43,24 @@ export default function EgeRobotKontrol() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [parkSensorOn, setParkSensorOn] = useState(false);
 
-  // Klavye Kontrolleri
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isLoggedIn) return;
-      switch (e.key) {
-        case "ArrowUp": sendCommand("F"); break;
-        case "ArrowDown": sendCommand("B"); break;
-        case "ArrowLeft": sendCommand("L"); break;
-        case "ArrowRight": sendCommand("R"); break;
-        case " ": sendCommand("H"); break; // Space -> Korna
-        case "e": case "E": sendCommand("P"); break; // E -> Su Sık
-        case "t": case "T": 
-          const newState = !parkSensorOn;
-          setParkSensorOn(newState);
-          sendCommand(newState ? "X" : "x"); 
-          break;
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (!isLoggedIn) return;
-      switch (e.key) {
-        case "ArrowUp": case "ArrowDown": case "ArrowLeft": case "ArrowRight":
-          sendCommand("S"); break;
-        case " ": sendCommand("h"); break;
-        case "e": case "E": sendCommand("p"); break;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [isLoggedIn, parkSensorOn]);
-
-  const baudRates = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600", "1382400"];
+  const baudRates = [
+    "50", "75", "110", "134.5", "150", "200", "300", "600", "1200", "1800",
+    "2400", "4800", "7200", "9600", "14400", "19200", "28800", "31250",
+    "38400", "57600", "76800", "115200", "128000", "153600", "230400",
+    "250000", "256000", "460800", "500000", "576000", "921600", "1000000",
+    "1152000", "1228800", "1382400", "1500000", "1843200", "2000000",
+    "2500000", "3000000", "3686400", "4000000"
+  ];
 
   useEffect(() => {
     const savedLogin = localStorage.getItem("isLoggedIn") || sessionStorage.getItem("isLoggedIn");
-    if (savedLogin === "true") {
-      setIsLoggedIn(true);
-    }
+    if (savedLogin === "true") setIsLoggedIn(true);
   }, []);
 
   useEffect(() => {
     if (!isLoggedIn) {
-      document.title = "Giriş Yap - Arduino Kontrol";
+      document.title = "Arduino Controller - Giriş Yap";
       return;
     }
 
@@ -94,32 +76,29 @@ export default function EgeRobotKontrol() {
       gyro_analiz: "Gyro Analiz Paneli"
     };
 
-    let title = "Arduino Kontrol Paneli";
-    let connStatus = "";
+    let title = "Arduino Controller";
 
     if (connectionMode === "bluetooth") {
-      title = activeTab ? (tabLabels[activeTab] || "Arduino Bluetooth Controller") : "Arduino Bluetooth Controller";
-      connStatus = characteristic ? " (Bağlı)" : " (Bağlı Değil)";
+      const statusText = characteristic ? "(Bağlı)" : "(Bağlı Değil)";
+      const tabName = activeTab ? tabLabels[activeTab] : "Bluetooth Kontrol";
+      title = `${tabName} ${statusText}`;
     } else if (connectionMode === "usb") {
-      title = activeTab ? (tabLabels[activeTab] || "Arduino USB Controller") : "Arduino USB Controller";
-      connStatus = usbWriter ? " (Bağlı)" : " (Bağlı Değil)";
+      const statusText = usbWriter ? "(Bağlı)" : "(Bağlı Değil)";
+      const tabName = activeTab ? tabLabels[activeTab] : "USB Kontrol";
+      title = `${tabName} ${statusText}`;
     }
 
-    document.title = `${title}${connStatus}`;
-  }, [connectionMode, activeTab, isLoggedIn, characteristic, usbWriter]);
+    document.title = title;
+  }, [isLoggedIn, connectionMode, activeTab, characteristic, usbWriter]);
 
   const addLog = (message: string) => {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev].slice(0, 50));
   };
 
   const connectUSB = async () => {
-    if (typeof navigator === "undefined" || !navigator.serial) {
-      addLog("Hata: Web Serial API bu tarayıcıda desteklenmiyor (Chrome/Edge önerilir).");
-      return;
-    }
     try {
       const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: parseInt(baudRate) });
+      await port.open({ baudRate: Number(baudRate) });
       const writer = port.writable.getWriter();
       setUsbPort(port);
       setUsbWriter(writer);
@@ -132,248 +111,190 @@ export default function EgeRobotKontrol() {
   };
 
   const disconnectUSB = async () => {
-    try {
-      const writer = usbWriter;
-      const port = usbPort;
-
-      // Önce state'leri temizleyerek alt bileşenlerin (monitor/plotter) kilitlerini bırakmasını tetikliyoruz
-      setUsbWriter(null);
-      setUsbPort(null);
-
-      if (writer) {
-        try { await writer.close(); } catch (e) {}
-        try { writer.releaseLock(); } catch (e) {}
-      }
-      
-      if (port) {
-        try { await port.close(); } catch (e) {}
-      }
-
-      setStatus("Bağlı Değil");
-      addLog("USB bağlantısı kesildi.");
-    } catch (err: any) {
-      addLog("USB Kapatma Hatası: " + err.message);
+    if (usbWriter) {
+      try {
+        await usbWriter.close();
+        usbWriter.releaseLock();
+      } catch (e) {}
     }
+    if (usbPort) {
+      try {
+        await usbPort.close();
+      } catch (e) {}
+    }
+    setUsbWriter(null);
+    setUsbPort(null);
+    setStatus("Bağlı Değil");
+    addLog("USB bağlantısı kesildi.");
   };
 
+  // Baud hızı değiştiğinde USB bağlantısı aktifse otomatik yenile
+  useEffect(() => {
+    const updateConnection = async () => {
+      if (usbPort && usbWriter && status === "USB Bağlı") {
+        try {
+          addLog(`Baud hızı ${baudRate} olarak güncelleniyor, bağlantı yenileniyor...`);
+          // Önce mevcut kilitleri ve portu serbest bırak
+          await usbWriter.close();
+          usbWriter.releaseLock();
+          await usbPort.close();
+          
+          // Yeni baud hızıyla aynı portu tekrar aç
+          await usbPort.open({ baudRate: Number(baudRate) });
+          setUsbWriter(usbPort.writable.getWriter());
+          addLog("Bağlantı yeni baud hızıyla başarıyla yenilendi.");
+        } catch (err: any) {
+          addLog("Otomatik baud yenileme hatası: " + err.message);
+          disconnectUSB();
+        }
+      }
+    };
+    updateConnection();
+  }, [baudRate]);
+
   const connectBT = async () => {
-    addLog("Cihaz aranıyor...");
-
-    if (typeof navigator === "undefined" || !navigator.bluetooth) {
-      addLog("Hata: Web Bluetooth desteklenmiyor. HTTPS bağlantısı ve Chrome/Edge tarayıcı gereklidir.");
-      setStatus("Desteklenmiyor");
-      return;
-    }
-
     try {
       const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [0xFFE0] }], 
-        optionalServices: [0xFFE1]
+        filters: [{ services: ["0000ffe0-0000-1000-8000-00805f9b34fb"] }],
+        optionalServices: ["0000ffe0-0000-1000-8000-00805f9b34fb"],
       });
-      
       setStatus("Bağlanıyor...");
       const server = await device.gatt?.connect();
-      const service = await server?.getPrimaryService(0xFFE0);
-      const char = await service?.getCharacteristic(0xFFE1);
-      
+      const service = await server?.getPrimaryService("0000ffe0-0000-1000-8000-00805f9b34fb");
+      const char = await service?.getCharacteristic("0000ffe1-0000-1000-8000-00805f9b34fb");
       setCharacteristic(char);
-      setStatus("Bağlantı Başarılı!");
-      addLog("Bağlantı kuruldu!");
-      
+      setStatus("Bağlandı");
+      addLog(`Bağlanılan Cihaz: ${device.name}`);
     } catch (err: any) {
-      if (err.name === 'NotFoundError') {
-        addLog("Seçim iptal edildi.");
-        setStatus("Cihaz Seçilmedi");
-      } else {
-        console.error(err);
-        setStatus("Bağlantı Hatası!");
-        addLog("Hata: " + err.message);
-      }
+      setStatus("Hata");
+      addLog("BT Hatası: " + err.message);
     }
   };
 
   const disconnectBT = () => {
-    try {
-      const device = characteristic?.service?.device;
-      if (device && device.gatt.connected) {
-        device.gatt.disconnect();
-      }
-    } catch (err) {}
-    
+    if (characteristic?.service?.device?.gatt?.connected) {
+      characteristic.service.device.gatt.disconnect();
+    }
     setCharacteristic(null);
     setStatus("Bağlı Değil");
-    addLog("Bluetooth bağlantısı kesildi.");
   };
 
   const sendCommand = async (cmd: string) => {
+    const encoder = new TextEncoder();
     if (characteristic) {
-      try {
-        const encoder = new TextEncoder();
-        await characteristic.writeValue(encoder.encode(cmd + "\n"));
-      } catch (err) {
-        addLog("Bluetooth veri gönderme hatası!");
-      }
+      try { await characteristic.writeValue(encoder.encode(cmd)); } catch (e) {}
     }
     if (usbWriter) {
-      try {
-        const encoder = new TextEncoder();
-        await usbWriter.write(encoder.encode(cmd + "\n"));
-      } catch (err) {
-        addLog("USB veri gönderme hatası!");
-      }
+      try { await usbWriter.write(encoder.encode(cmd)); } catch (e) {}
     }
   };
 
   const handleLogin = () => {
     if (username.trim() === "ege.senturk" && password === "ege0514") {
       setIsLoggedIn(true);
-      if (rememberMe) {
-        localStorage.setItem("isLoggedIn", "true");
-      } else {
-        sessionStorage.setItem("isLoggedIn", "true");
-      }
+      if (rememberMe) localStorage.setItem("isLoggedIn", "true");
+      else sessionStorage.setItem("isLoggedIn", "true");
     } else {
       alert("Yanlış kullanıcı adı veya şifre!");
     }
   };
 
-  const handleLogout = async () => {
-    // Çıkış yapmadan önce aktif bir bağlantı varsa otomatik olarak kesiyoruz
-    if (characteristic) {
-      disconnectBT();
-    }
-    if (usbPort || usbWriter) {
-      await disconnectUSB();
-    }
-
+  // Çıkış yaparken tüm gezinti durumlarını sıfırla
+  const handleLogout = () => {
     setIsLoggedIn(false);
     setConnectionMode(null);
     setActiveTab(null);
-    localStorage.removeItem("isLoggedIn");
-    sessionStorage.removeItem("isLoggedIn");
+    // Bağlantıları da kesmek istersen burada disconnect fonksiyonlarını çağırabilirsin
   };
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md space-y-6 border border-gray-100">
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md space-y-6">
           <h2 className="text-3xl font-bold text-center text-gray-800">Giriş Yap</h2>
-          <div>
-            <label htmlFor="username" className="block text-sm font-bold text-black mb-1">Kullanıcı Adı</label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
-              placeholder="Kullanıcı adınızı girin"
-            />
-          </div>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-black"
+            placeholder="Kullanıcı Adı"
+          />
           <div className="relative">
-            <label htmlFor="password" className="block text-sm font-bold text-black mb-1">Şifre</label>
             <input
               type={showPassword ? "text" : "password"}
-              id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10 text-black"
-              placeholder="Şifrenizi girin"
+              className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-black"
+              placeholder="Şifre"
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
             />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute inset-y-0 right-0 top-6 flex items-center px-3 text-gray-600"
-            >
-              {showPassword ? (
-                <span className="relative">
-                  👁️
-                  <span className="absolute top-1/2 left-1/2 w-full h-0.5 bg-gray-600 transform -translate-x-1/2 -translate-y-1/2 rotate-45"></span>
-                </span>
-              ) : (
-                <span>👁️</span>
-              )}
+            <button onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center h-10 w-10">
+              <span className="relative text-xl">
+                👁️
+                {showPassword && (
+                  <div className="absolute top-1/2 left-1/2 w-full h-[2px] bg-black -translate-x-1/2 -translate-y-1/2 -rotate-45" />
+                )}
+              </span>
             </button>
           </div>
-          <div className="flex items-center gap-2 px-1">
-            <input
-              type="checkbox"
-              id="rememberMe"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="w-4 h-4 cursor-pointer accent-blue-600"
-            />
-            <label htmlFor="rememberMe" className="text-sm text-gray-600 font-medium cursor-pointer select-none">Beni Hatırla</label>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="rem" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
+            <label htmlFor="rem" className="text-sm text-gray-600">Beni Hatırla</label>
           </div>
-          <button
-            onClick={handleLogin}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-xl hover:bg-blue-700 transition-colors font-bold shadow-lg"
-          >
-            Giriş Yap
-          </button>
+          <button onClick={handleLogin} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Giriş Yap</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white text-black font-sans flex flex-col">
-      {/* Üst Header */}
+    <div className="min-h-screen bg-white text-black flex flex-col">
       <header className="w-full p-6 border-b flex flex-col items-center bg-gray-50 gap-4">
         <div className="w-full flex justify-between items-center max-w-6xl">
-          <div className="w-20" /> {/* Spacer */}
-          <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tighter text-center">Arduino Bluetooth ve USB Kontrol Paneli</h1>
-          <button onClick={handleLogout} className="bg-[#ff0000] text-[#ffffff] px-6 py-2 rounded-full font-bold transition-all shadow-lg active:scale-95 text-xs hover:bg-red-700 uppercase tracking-widest">
-            Çıkış Yap
-          </button>
+          <h1 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Arduino Controller</h1>
+          <button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 text-white px-6 py-2.5 rounded-full text-xs font-black uppercase transition-all active:scale-95 shadow-md">Çıkış Yap</button>
         </div>
-        <div className="flex items-center gap-6">
-          <span className={`text-xs font-bold px-4 py-1.5 rounded-full border ${status.includes("Bağlı") || status.includes("Başarılı") ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
-            DURUM: {status.toUpperCase()}
-          </span>
+        <div className="flex flex-wrap items-center justify-center gap-6">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Bluetooth Durum:</span>
+            <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${characteristic ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+              {characteristic ? "BAĞLANDI" : "BAĞLI DEĞİL"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">USB Durum:</span>
+            <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${usbWriter ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+              {usbWriter ? "BAĞLANDI" : "BAĞLI DEĞİL"}
+            </span>
+          </div>
+
           <div className="flex gap-2">
             {characteristic ? (
-              <button onClick={disconnectBT} className="bg-[#FF0000] hover:bg-red-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-lg active:scale-95 text-xs">
-                BT BAĞLANTIYI KES
-              </button>
+              <button onClick={disconnectBT} className="bg-red-600 text-white px-4 py-1.5 rounded-lg font-bold text-[10px]">BT KES</button>
             ) : (
-              <button onClick={connectBT} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-lg active:scale-95 text-xs">
-                BT BAĞLAN
-              </button>
+              <button onClick={connectBT} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg font-bold text-[10px]">BLUETOOTH BAĞLAN</button>
             )}
             {usbWriter ? (
-              <button onClick={disconnectUSB} className="bg-[#FF0000] hover:bg-red-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-lg active:scale-95 text-xs">
-                USB BAĞLANTIYI KES
-              </button>
+              <button onClick={disconnectUSB} className="bg-red-600 text-white px-4 py-1.5 rounded-lg font-bold text-[10px]">USB KES</button>
             ) : (
-              <button onClick={connectUSB} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-lg active:scale-95 text-xs">
-                USB BAĞLAN
-              </button>
+              <button onClick={connectUSB} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg font-bold text-[10px]">USB BAĞLAN</button>
             )}
           </div>
         </div>
       </header>
 
-      {/* Ana İçerik */}
-      <main className="flex-1 flex flex-col items-center justify-center p-6 w-full relative">
+      <main className="flex-1 flex flex-col items-center justify-center p-4">
         {connectionMode === null ? (
-          /* İlk Seçim: Bluetooth vs USB */
-          <nav className="grid grid-cols-1 md:grid-cols-2 gap-10 max-w-4xl w-full animate-in fade-in zoom-in duration-300">
-            <button
-              onClick={() => setConnectionMode("bluetooth")}
-              className="w-full aspect-video rounded-[3rem] bg-white flex flex-col items-center justify-center gap-6 font-bold transition-all shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-gray-100 hover:scale-105 hover:shadow-2xl active:scale-95 group"
-            >
-              <span className="text-8xl group-hover:drop-shadow-lg transition-all">📱</span>
-              <span className="text-xl uppercase tracking-[0.2em] text-gray-500 group-hover:text-blue-600">Bluetooth Kontrol</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
+            <button onClick={() => setConnectionMode("bluetooth")} className="aspect-video bg-white border border-gray-100 shadow-xl rounded-[2rem] flex flex-col items-center justify-center gap-4 hover:scale-105 transition-transform group">
+              <span className="text-6xl">📱</span>
+              <span className="font-bold text-gray-400 group-hover:text-blue-600 uppercase tracking-widest">Bluetooth Kontrol</span>
             </button>
-            <button
-              onClick={() => setConnectionMode("usb")}
-              className="w-full aspect-video rounded-[3rem] bg-white flex flex-col items-center justify-center gap-6 font-bold transition-all shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-gray-100 hover:scale-105 hover:shadow-2xl active:scale-95 group"
-            >
-              <span className="text-8xl group-hover:drop-shadow-lg transition-all">🔌</span>
-              <span className="text-xl uppercase tracking-[0.2em] text-gray-500 group-hover:text-emerald-600">USB Kontrol</span>
+            <button onClick={() => setConnectionMode("usb")} className="aspect-video bg-white border border-gray-100 shadow-xl rounded-[2rem] flex flex-col items-center justify-center gap-4 hover:scale-105 transition-transform group">
+              <span className="text-6xl">🔌</span>
+              <span className="font-bold text-gray-400 group-hover:text-emerald-600 uppercase tracking-widest">USB Kontrol</span>
             </button>
-          </nav>
+          </div>
         ) : connectionMode === "bluetooth" ? (
           <BluetoothView 
             activeTab={activeTab}
@@ -382,6 +303,9 @@ export default function EgeRobotKontrol() {
             sendCommand={sendCommand}
             logs={logs}
             addLog={addLog}
+            deviceName={characteristic?.service?.device?.name || "Bilinmiyor"}
+            connectionStatus={status as any}
+            isConnected={!!characteristic}
           />
         ) : (
           <UsbView 
@@ -394,13 +318,13 @@ export default function EgeRobotKontrol() {
         )}
       </main>
 
-      {/* Sağ Alt Baud Seçimi */}
-      <div className="fixed bottom-4 right-4 bg-white border p-2 rounded-xl shadow-xl flex items-center gap-2">
-        <label className="text-xs font-bold text-gray-500">BAUD:</label>
+      {/* Sağ Alt Baud Seçimi - Sabit */}
+      <div className="fixed bottom-6 right-6 bg-white border border-gray-100 p-3 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.1)] flex items-center gap-3 z-50 transition-all hover:scale-105">
+        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Baud Rate</label>
         <select 
           value={baudRate} 
           onChange={(e) => setBaudRate(e.target.value)}
-          className="text-sm outline-none bg-transparent font-mono cursor-pointer"
+          className="text-xs font-black outline-none bg-gray-50 px-3 py-1.5 rounded-lg cursor-pointer text-blue-600"
         >
           {baudRates.map(b => <option key={b} value={b}>{b}</option>)}
         </select>

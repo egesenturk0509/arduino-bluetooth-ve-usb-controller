@@ -1,10 +1,13 @@
 "use client";
+import { useState } from "react";
 import RgbControl from "./RgbControl";
 import BluetoothTerminal from "./BluetoothTerminal";
-import JoystickControl from "./JoystickControl";
 import KeypadControl from "./KeypadControl";
 import VoiceControl from "./VoiceControl";
 import SimpleLed from "./SimpleLed";
+import DirectionPad from "../DirectionPad";
+import PSButtons from "../PSButtons";
+import { Command } from "../bluetooth";
 
 interface BluetoothViewProps {
   activeTab: string | null;
@@ -13,6 +16,9 @@ interface BluetoothViewProps {
   sendCommand: (cmd: string) => void;
   logs: string[];
   addLog: (msg: string) => void;
+  deviceName: string;
+  connectionStatus: any;
+  isConnected: boolean;
 }
 
 export default function BluetoothView({
@@ -21,8 +27,18 @@ export default function BluetoothView({
   setConnectionMode,
   sendCommand,
   logs,
-  addLog
+  addLog,
+  deviceName,
+  connectionStatus,
+  isConnected
 }: BluetoothViewProps) {
+  const [isSystemActive, setIsSystemActive] = useState(false);
+
+  const handleStartSystem = () => {
+    sendCommand(Command.START_SYSTEM);
+    setIsSystemActive(true);
+  };
+
   if (activeTab === null) {
     return (
       <div className="w-full flex flex-col items-center">
@@ -67,7 +83,18 @@ export default function BluetoothView({
       <div className="min-h-[400px]">
         {activeTab === "rgb" && <RgbControl sendCommand={sendCommand} />}
         {activeTab === "terminal" && <BluetoothTerminal logs={logs} addLog={addLog} sendCommand={sendCommand} />}
-        {activeTab === "joystick" && <JoystickControl sendCommand={sendCommand} />}
+        {activeTab === "joystick" && (
+          <div className="flex flex-col items-center gap-8 py-4">
+            <div className="w-full flex flex-col lg:flex-row items-center justify-around gap-12">
+              <DirectionPad sendCommand={sendCommand} disabled={!isConnected || !isSystemActive} />
+              <PSButtons 
+                sendCommand={sendCommand} 
+                onStart={handleStartSystem} 
+                isConnected={isConnected} 
+              />
+            </div>
+          </div>
+        )}
         {activeTab === "buttons" && <SimpleLed sendCommand={sendCommand} />}
         {activeTab === "keypad" && <KeypadControl sendCommand={sendCommand} />}
         {activeTab === "voice" && <VoiceControl addLog={addLog} sendCommand={sendCommand} />}
